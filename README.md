@@ -39,6 +39,11 @@ simple (sauf `localhost`).
 - **Stockage** : IndexedDB, dans le navigateur, sur cet appareil uniquement.
 - **Verrouillage automatique** : après 3 minutes d'inactivité ou dès que l'onglet
   passe en arrière-plan.
+- **Corbeille** : supprimer un document ou un mot de passe le déplace dans la
+  corbeille (accessible via la puce « 🗑️ Corbeille ») plutôt que de l'effacer
+  tout de suite — on peut le restaurer, ou le supprimer définitivement (action
+  irréversible, avec confirmation). Les éléments y sont purgés automatiquement
+  après 30 jours.
 
 ## Limites à connaître
 

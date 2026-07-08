@@ -170,6 +170,8 @@ body {
 }
 .chip.active { background: var(--accent); border-color: var(--accent); color: white; }
 .chip-new { color: var(--accent); border-style: dashed; }
+.chip-trash { color: var(--text-muted); }
+.chip-trash.active { background: var(--danger); border-color: var(--danger); color: white; }
 
 .item-list {
   padding: 0 1rem 6rem;
@@ -219,6 +221,20 @@ body {
 .item-info { min-width: 0; flex: 1; }
 .item-title { font-weight: 600; font-size: 0.98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-sub { font-size: 0.8rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.trash-card { cursor: default; }
+.trash-actions { display: flex; flex-direction: column; gap: 0.35rem; flex: none; }
+.trash-actions button {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.trash-actions .btn-purge { color: var(--danger); border-color: var(--danger); }
 
 .empty-state {
   flex: 1;

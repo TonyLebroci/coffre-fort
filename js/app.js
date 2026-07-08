@@ -233,12 +233,25 @@ async function loadVaultData() {
     try {
       const data = await wa.decryptJson(state.vaultKey, it.metaIv, it.metaCipher);
       state.items.push({
-        id: it.id, folderId: it.folderId, type: it.type,
+        id: it.id, folderId: it.folderId, type: it.type, deletedAt: it.deletedAt || null,
         createdAt: it.createdAt, updatedAt: it.updatedAt, mimeType: it.mimeType,
         ...data, _record: it,
       });
     } catch (err) { console.error('Élément illisible', it.id, err); }
   }
+
+  // Purge silencieuse des éléments à la corbeille depuis plus de 30 jours.
+  const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const expired = state.items.filter((i) => i.deletedAt && now - i.deletedAt > TRASH_RETENTION_MS);
+  for (const item of expired) {
+    await db.deleteItem(item.id);
+  }
+  if (expired.length) {
+    const expiredIds = new Set(expired.map((i) => i.id));
+    state.items = state.items.filter((i) => !expiredIds.has(i.id));
+  }
+
   state.currentFolderId = 'all';
   state.searchQuery = '';
   $('search-input').value = '';
@@ -252,13 +265,15 @@ async function loadVaultData() {
 function renderFolders() {
   const container = $('folder-chips');
   container.innerHTML = '';
+  const activeItems = state.items.filter((i) => !i.deletedAt);
+  const trashCount = state.items.length - activeItems.length;
   const counts = new Map();
-  for (const it of state.items) {
+  for (const it of activeItems) {
     const key = it.folderId || 'unfiled';
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const chipsData = [
-    { id: 'all', name: 'Tous', count: state.items.length },
+    { id: 'all', name: 'Tous', count: activeItems.length },
     { id: 'unfiled', name: 'Non classé', count: counts.get('unfiled') || 0 },
     ...state.folders.slice().sort((a, b) => a.name.localeCompare(b.name, 'fr'))
       .map((f) => ({ id: f.id, name: f.name, count: counts.get(f.id) || 0 })),
@@ -290,6 +305,19 @@ function renderFolders() {
   newBtn.textContent = '+ Dossier';
   newBtn.addEventListener('click', () => openFolderDialog(null));
   container.appendChild(newBtn);
+
+  const trashBtn = document.createElement('button');
+  trashBtn.type = 'button';
+  trashBtn.className = 'chip chip-trash' + (state.currentFolderId === 'trash' ? ' active' : '');
+  trashBtn.textContent = `🗑️ Corbeille (${trashCount})`;
+  trashBtn.addEventListener('click', () => {
+    state.currentFolderId = 'trash';
+    renderFolders();
+    renderItems();
+  });
+  container.appendChild(trashBtn);
+
+  $('btn-add').hidden = state.currentFolderId === 'trash';
 }
 
 function populateFolderSelect(select, currentValue) {
@@ -367,14 +395,22 @@ $('folder-delete').addEventListener('click', async () => {
 // Rendu — liste des éléments + recherche
 // ---------------------------------------------------------------------------
 function filteredItems() {
-  let list = state.items;
   const q = state.searchQuery.trim().toLowerCase();
+  const matchesQuery = (i) => {
+    if (!q) return true;
+    const folderName = i.folderId ? (state.folders.find((f) => f.id === i.folderId)?.name || '') : 'non classé';
+    const hay = [i.title, i.username, folderName].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  };
+
+  if (state.currentFolderId === 'trash') {
+    return state.items.filter((i) => i.deletedAt && matchesQuery(i))
+      .sort((a, b) => b.deletedAt - a.deletedAt);
+  }
+
+  let list = state.items.filter((i) => !i.deletedAt);
   if (q) {
-    list = list.filter((i) => {
-      const folderName = i.folderId ? (state.folders.find((f) => f.id === i.folderId)?.name || '') : 'non classé';
-      const hay = [i.title, i.username, folderName].filter(Boolean).join(' ').toLowerCase();
-      return hay.includes(q);
-    });
+    list = list.filter(matchesQuery);
   } else if (state.currentFolderId === 'unfiled') {
     list = list.filter((i) => !i.folderId);
   } else if (state.currentFolderId !== 'all') {
@@ -390,13 +426,56 @@ function renderItems() {
   container.innerHTML = '';
   if (list.length === 0) {
     empty.hidden = false;
-    $('empty-text').innerHTML = state.searchQuery.trim()
-      ? 'Aucun résultat pour cette recherche.'
-      : 'Aucun document pour l\'instant.<br/>Appuie sur + pour ajouter ta première carte.';
+    if (state.currentFolderId === 'trash') {
+      $('empty-text').textContent = 'La corbeille est vide.';
+    } else {
+      $('empty-text').innerHTML = state.searchQuery.trim()
+        ? 'Aucun résultat pour cette recherche.'
+        : 'Aucun document pour l\'instant.<br/>Appuie sur + pour ajouter ta première carte.';
+    }
     return;
   }
   empty.hidden = true;
-  for (const item of list) container.appendChild(renderItemCard(item));
+  for (const item of list) {
+    container.appendChild(item.deletedAt ? renderTrashCard(item) : renderItemCard(item));
+  }
+}
+
+function renderTrashCard(item) {
+  const card = document.createElement('div');
+  card.className = 'item-card trash-card';
+
+  const thumb = document.createElement('div');
+  thumb.className = 'item-thumb';
+  thumb.textContent = item.type === 'password' ? '🔑' : '📄';
+  card.appendChild(thumb);
+
+  const info = document.createElement('div');
+  info.className = 'item-info';
+  const title = document.createElement('div');
+  title.className = 'item-title';
+  title.textContent = item.title || '(Sans titre)';
+  const sub = document.createElement('div');
+  sub.className = 'item-sub';
+  sub.textContent = `Supprimé le ${formatDate(item.deletedAt)}`;
+  info.append(title, sub);
+  card.appendChild(info);
+
+  const actions = document.createElement('div');
+  actions.className = 'trash-actions';
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.textContent = 'Restaurer';
+  restoreBtn.addEventListener('click', () => restoreItem(item.id));
+  const purgeBtn = document.createElement('button');
+  purgeBtn.type = 'button';
+  purgeBtn.className = 'btn-purge';
+  purgeBtn.textContent = 'Supprimer déf.';
+  purgeBtn.addEventListener('click', () => purgeItem(item.id));
+  actions.append(restoreBtn, purgeBtn);
+  card.appendChild(actions);
+
+  return card;
 }
 
 function renderItemCard(item) {
@@ -453,6 +532,8 @@ async function getThumbUrl(item) {
   return url;
 }
 
+// Suppression définitive (irréversible). N'est appelée que depuis la
+// corbeille, ou lors de la purge automatique des éléments trop anciens.
 async function removeItem(id) {
   await db.deleteItem(id);
   const idx = state.items.findIndex((i) => i.id === id);
@@ -463,6 +544,41 @@ async function removeItem(id) {
   }
   renderFolders();
   renderItems();
+}
+
+// Suppression « normale » : déplace vers la corbeille, récupérable.
+async function moveItemToTrash(id) {
+  const item = state.items.find((i) => i.id === id);
+  if (!item) return;
+  item._record.deletedAt = Date.now();
+  await db.putItem(item._record);
+  item.deletedAt = item._record.deletedAt;
+  if (state.thumbCache.has(id)) {
+    URL.revokeObjectURL(state.thumbCache.get(id));
+    state.thumbCache.delete(id);
+  }
+  renderFolders();
+  renderItems();
+}
+
+async function restoreItem(id) {
+  const item = state.items.find((i) => i.id === id);
+  if (!item) return;
+  delete item._record.deletedAt;
+  item._record.updatedAt = Date.now();
+  await db.putItem(item._record);
+  delete item.deletedAt;
+  item.updatedAt = item._record.updatedAt;
+  renderFolders();
+  renderItems();
+  showToast('Élément restauré.');
+}
+
+async function purgeItem(id) {
+  const ok = await confirmDialog('Supprimer définitivement cet élément ? Cette action est irréversible.');
+  if (!ok) return;
+  await removeItem(id);
+  showToast('Supprimé définitivement.');
 }
 
 $('btn-search-toggle').addEventListener('click', () => {
@@ -626,12 +742,11 @@ $('dialog-viewer').addEventListener('close', async () => {
 });
 $('viewer-close').addEventListener('click', () => $('dialog-viewer').close());
 $('viewer-delete').addEventListener('click', async () => {
-  const ok = await confirmDialog('Supprimer définitivement ce document ?');
-  if (!ok) return;
   const id = currentViewerItemId;
   currentViewerItemId = null; // évite une tentative de sauvegarde des champs à la fermeture
-  await removeItem(id);
+  await moveItemToTrash(id);
   $('dialog-viewer').close();
+  showToast('Déplacé dans la corbeille.');
 });
 
 // ---------------------------------------------------------------------------
@@ -679,12 +794,11 @@ $('form-password-detail').addEventListener('submit', async (e) => {
 });
 
 $('pwd-delete').addEventListener('click', async () => {
-  const ok = await confirmDialog('Supprimer définitivement ce mot de passe ?');
-  if (!ok) return;
   const id = currentPasswordItemId;
   currentPasswordItemId = null;
-  await removeItem(id);
+  await moveItemToTrash(id);
   $('dialog-password').close();
+  showToast('Déplacé dans la corbeille.');
 });
 
 // Copie dans le presse-papiers, effacée automatiquement après 20 s.
