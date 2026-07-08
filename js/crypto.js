@@ -16,13 +16,17 @@ export async function isPlatformAuthenticatorAvailable() {
   }
 }
 
+// rp.id explicite (le nom d'hôte, sans port) : évite toute ambiguïté sur le
+// domaine associé au passkey plutôt que de compter sur la valeur par défaut.
+const RP_ID = location.hostname;
+
 // Crée le passkey lié à Face ID / Touch ID (authenticator "platform").
 export async function createPasskey() {
   const challenge = randomBytes(32);
   const userId = randomBytes(16);
   const cred = await navigator.credentials.create({
     publicKey: {
-      rp: { name: 'Coffre-fort' },
+      rp: { id: RP_ID, name: 'Coffre-fort' },
       user: { id: userId, name: 'coffre-fort', displayName: 'Coffre-fort' },
       challenge,
       pubKeyCredParams: [
@@ -43,6 +47,15 @@ export async function createPasskey() {
   return { rawId: cred.rawId, userId };
 }
 
+// `transports: ['internal']` indique explicitement au navigateur que cette
+// clé vit sur l'authentificateur de la plateforme (Face ID / Touch ID) : sans
+// cet indice, certains navigateurs affichent le sélecteur générique de clés
+// d'accès (avec l'option « utiliser un appareil à proximité ») au lieu
+// d'ouvrir directement Face ID.
+function allowThisCredential(rawId) {
+  return [{ id: rawId, type: 'public-key', transports: ['internal'] }];
+}
+
 // Demande une confirmation biométrique et récupère le secret PRF (si le
 // navigateur/l'authentificateur le supporte). Ce secret est déterministe :
 // il est dérivé du credential + du sel fourni, jamais stocké tel quel.
@@ -50,8 +63,9 @@ export async function getPrfSecret(rawId, salt) {
   const challenge = randomBytes(32);
   const assertion = await navigator.credentials.get({
     publicKey: {
+      rpId: RP_ID,
       challenge,
-      allowCredentials: [{ id: rawId, type: 'public-key' }],
+      allowCredentials: allowThisCredential(rawId),
       userVerification: 'required',
       extensions: { prf: { eval: { first: salt } } },
     },
@@ -66,8 +80,9 @@ export async function assertPresenceOnly(rawId) {
   const challenge = randomBytes(32);
   await navigator.credentials.get({
     publicKey: {
+      rpId: RP_ID,
       challenge,
-      allowCredentials: [{ id: rawId, type: 'public-key' }],
+      allowCredentials: allowThisCredential(rawId),
       userVerification: 'required',
     },
   });

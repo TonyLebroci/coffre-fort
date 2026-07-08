@@ -109,3 +109,14 @@ export async function reassignFolder(oldFolderId, newFolderId) {
   });
   await txDone(t);
 }
+
+// Efface tout (utilisé quand le passkey d'origine n'est plus utilisable et
+// qu'il faut repartir de zéro). Irréversible : aucune sauvegarde n'existe.
+export async function clearAll() {
+  const db = await openDb();
+  const t = db.transaction(['meta', 'folders', 'items'], 'readwrite');
+  t.objectStore('meta').clear();
+  t.objectStore('folders').clear();
+  t.objectStore('items').clear();
+  await txDone(t);
+}

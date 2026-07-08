@@ -42,10 +42,10 @@ function showToast(msg, ms = 3000) {
 
 function friendlyError(err) {
   if (!err) return 'Erreur inconnue.';
-  if (err.name === 'NotAllowedError') return 'Authentification annulée ou refusée.';
+  if (err.name === 'NotAllowedError') return 'Authentification annulée, refusée, ou clé introuvable sur cet appareil.';
   if (err.name === 'InvalidStateError') return 'Un passkey existe déjà pour cet appareil.';
   if (err.name === 'OperationError') return 'Clé incorrecte.';
-  return err.message || 'Erreur inconnue.';
+  return (err.name ? err.name + ' : ' : '') + (err.message || 'Erreur inconnue.');
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +153,33 @@ $('btn-unlock').addEventListener('click', async () => {
     showToast(err.message === 'PRF_UNAVAILABLE' ? 'Impossible de dériver la clé sur cet appareil.' : friendlyError(err));
   } finally {
     btn.disabled = false;
+  }
+});
+
+// Filet de sécurité : si le passkey d'origine devient inutilisable (perdu,
+// non reconnu par l'appareil, etc.), il n'existe aucun autre moyen de
+// déchiffrer le coffre — mais l'utilisateur doit pouvoir recommencer plutôt
+// que de rester bloqué indéfiniment sur l'écran de verrouillage.
+$('btn-reset-vault').addEventListener('click', async () => {
+  const ok = await confirmDialog(
+    'Réinitialiser supprime définitivement tous les documents et mots de passe stockés sur cet appareil ' +
+    '(aucune sauvegarde n\'existe ailleurs). À utiliser seulement si Face ID / Touch ID ne parvient plus ' +
+    'du tout à déverrouiller le coffre. Continuer ?'
+  );
+  if (!ok) return;
+  try {
+    await db.clearAll();
+    state.vaultKey = null;
+    state.meta = null;
+    state.folders = [];
+    state.items = [];
+    for (const url of state.thumbCache.values()) URL.revokeObjectURL(url);
+    state.thumbCache.clear();
+    showToast('Coffre-fort réinitialisé.');
+    showScreen('setup');
+  } catch (err) {
+    console.error(err);
+    showToast('La réinitialisation a échoué : ' + friendlyError(err));
   }
 });
 
