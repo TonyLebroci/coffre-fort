@@ -92,6 +92,13 @@
     <div class="viewer-body">
       <img id="viewer-img" alt="" />
     </div>
+    <div id="viewer-face-bar" class="viewer-face-bar" hidden>
+      <button type="button" id="viewer-face-front" class="face-btn active">Recto</button>
+      <button type="button" id="viewer-face-verso" class="face-btn">Verso</button>
+      <button type="button" id="viewer-verso-remove" class="icon-btn" aria-label="Supprimer le verso" title="Supprimer le verso">🗑️</button>
+    </div>
+    <button type="button" id="viewer-add-verso" class="btn btn-secondary viewer-add-verso" hidden>+ Ajouter le verso</button>
+    <input id="viewer-verso-input" type="file" accept="image/*" class="visually-hidden" />
     <div class="viewer-footer">
       <label class="field-label" for="viewer-folder">Dossier</label>
       <select id="viewer-folder"></select>
@@ -155,11 +162,19 @@
     </div>
 
     <form id="form-add-document" class="dialog-form add-step" hidden>
-      <label class="btn btn-secondary file-label" for="doc-file-input">Choisir ou prendre une photo</label>
+      <label class="btn btn-secondary file-label" for="doc-file-input">Choisir ou prendre une photo (recto)</label>
       <input id="doc-file-input" type="file" accept="image/*" class="visually-hidden" />
       <div id="doc-preview-wrap" class="doc-preview-wrap" hidden>
-        <img id="doc-preview" alt="Aperçu" />
+        <img id="doc-preview" alt="Aperçu recto" />
       </div>
+
+      <label class="btn btn-secondary file-label" for="doc-verso-input" id="doc-verso-label">+ Ajouter le verso (optionnel)</label>
+      <input id="doc-verso-input" type="file" accept="image/*" class="visually-hidden" />
+      <div id="doc-verso-preview-wrap" class="doc-preview-wrap" hidden>
+        <img id="doc-verso-preview" alt="Aperçu verso" />
+        <button type="button" id="doc-verso-remove" class="icon-btn doc-verso-remove" aria-label="Retirer le verso" title="Retirer le verso">✕</button>
+      </div>
+
       <label class="field-label">Titre
         <input id="doc-title" type="text" required placeholder="ex. Carte d'identité" />
       </label>

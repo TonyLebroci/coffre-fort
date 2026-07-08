@@ -16,9 +16,10 @@ const state = {
 };
 
 let currentViewerItemId = null;
+let currentViewerFace = 'front'; // 'front' | 'back'
 let currentPasswordItemId = null;
 let editingFolderId = null;
-let pendingDoc = null;
+let pendingDoc = { front: null, verso: null };
 
 const dateFormatter = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 const formatDate = (ts) => dateFormatter.format(new Date(ts));
@@ -400,7 +401,14 @@ function renderItemCard(item) {
 
   if (item.type === 'document' && item._record.thumbCipher) {
     getThumbUrl(item).then((url) => {
-      if (url) thumb.innerHTML = `<img src="${url}" alt="" />`;
+      if (!url) return;
+      thumb.innerHTML = `<img src="${url}" alt="" />`;
+      if (item._record.backCipher) {
+        const badge = document.createElement('span');
+        badge.className = 'thumb-badge';
+        badge.textContent = 'R/V';
+        thumb.appendChild(badge);
+      }
     }).catch(() => {});
   }
 
@@ -449,27 +457,117 @@ $('search-input').addEventListener('input', (e) => {
 // ---------------------------------------------------------------------------
 // Visionneuse plein écran (documents)
 // ---------------------------------------------------------------------------
-async function openViewer(id) {
-  const item = state.items.find((i) => i.id === id);
-  if (!item) return;
-  currentViewerItemId = id;
+async function loadViewerFace(item, face) {
+  const rec = item._record;
+  const iv = face === 'back' ? rec.backIv : rec.fileIv;
+  const cipher = face === 'back' ? rec.backCipher : rec.fileCipher;
+  if (!cipher) return;
   const img = $('viewer-img');
-  img.removeAttribute('src');
   try {
-    const bytes = await wa.decryptBytes(state.vaultKey, item._record.fileIv, item._record.fileCipher);
+    const bytes = await wa.decryptBytes(state.vaultKey, iv, cipher);
     const blob = new Blob([bytes], { type: item.mimeType || 'image/jpeg' });
     const url = URL.createObjectURL(blob);
+    if (img.dataset.blobUrl) URL.revokeObjectURL(img.dataset.blobUrl);
     img.src = url;
     img.dataset.blobUrl = url;
   } catch (err) {
     console.error(err);
-    showToast('Impossible d\'ouvrir ce document.');
-    return;
+    showToast('Impossible d\'ouvrir cette image.');
   }
+}
+
+function updateViewerFaceUI(item) {
+  const hasVerso = !!item._record.backCipher;
+  $('viewer-face-bar').hidden = !hasVerso;
+  $('viewer-add-verso').hidden = hasVerso;
+  $('viewer-face-front').classList.toggle('active', currentViewerFace === 'front');
+  $('viewer-face-verso').classList.toggle('active', currentViewerFace === 'back');
+}
+
+async function openViewer(id) {
+  const item = state.items.find((i) => i.id === id);
+  if (!item) return;
+  currentViewerItemId = id;
+  currentViewerFace = 'front';
+  $('viewer-img').removeAttribute('src');
+  await loadViewerFace(item, 'front');
   $('viewer-title').value = item.title;
   populateFolderSelect($('viewer-folder'), item.folderId);
+  updateViewerFaceUI(item);
   $('dialog-viewer').showModal();
 }
+
+$('viewer-face-front').addEventListener('click', async () => {
+  if (currentViewerFace === 'front') return;
+  const item = state.items.find((i) => i.id === currentViewerItemId);
+  if (!item) return;
+  currentViewerFace = 'front';
+  await loadViewerFace(item, 'front');
+  updateViewerFaceUI(item);
+});
+$('viewer-face-verso').addEventListener('click', async () => {
+  if (currentViewerFace === 'back') return;
+  const item = state.items.find((i) => i.id === currentViewerItemId);
+  if (!item) return;
+  currentViewerFace = 'back';
+  await loadViewerFace(item, 'back');
+  updateViewerFaceUI(item);
+});
+
+$('viewer-verso-remove').addEventListener('click', async () => {
+  const item = state.items.find((i) => i.id === currentViewerItemId);
+  if (!item) return;
+  const ok = await confirmDialog('Supprimer la photo du verso ?');
+  if (!ok) return;
+  const rec = item._record;
+  delete rec.backIv;
+  delete rec.backCipher;
+  delete rec.backThumbIv;
+  delete rec.backThumbCipher;
+  rec.updatedAt = Date.now();
+  await db.putItem(rec);
+  item.updatedAt = rec.updatedAt;
+  currentViewerFace = 'front';
+  await loadViewerFace(item, 'front');
+  updateViewerFaceUI(item);
+  renderItems();
+  showToast('Verso supprimé.');
+});
+
+$('viewer-add-verso').addEventListener('click', () => $('viewer-verso-input').click());
+$('viewer-verso-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const item = state.items.find((i) => i.id === currentViewerItemId);
+  if (!item) { e.target.value = ''; return; }
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const fullBlob = await drawToCanvasBlob(bitmap, 1600, 0.85);
+    const thumbBlob = await drawToCanvasBlob(bitmap, 220, 0.7);
+    const fullBytes = new Uint8Array(await fullBlob.arrayBuffer());
+    const thumbBytes = new Uint8Array(await thumbBlob.arrayBuffer());
+    const { iv: backIv, cipher: backCipher } = await wa.encryptBytes(state.vaultKey, fullBytes);
+    const { iv: backThumbIv, cipher: backThumbCipher } = await wa.encryptBytes(state.vaultKey, thumbBytes);
+    const rec = item._record;
+    rec.backIv = backIv;
+    rec.backCipher = backCipher;
+    rec.backThumbIv = backThumbIv;
+    rec.backThumbCipher = backThumbCipher;
+    rec.updatedAt = Date.now();
+    await db.putItem(rec);
+    item.updatedAt = rec.updatedAt;
+    currentViewerFace = 'back';
+    await loadViewerFace(item, 'back');
+    updateViewerFaceUI(item);
+    renderItems();
+    showToast('Verso ajouté.');
+  } catch (err) {
+    console.error(err);
+    showToast('Impossible de lire cette image.');
+  } finally {
+    e.target.value = '';
+  }
+});
 
 async function saveViewerChangesIfNeeded() {
   if (!state.vaultKey) return;
@@ -497,6 +595,7 @@ $('dialog-viewer').addEventListener('close', async () => {
   if (img.dataset.blobUrl) { URL.revokeObjectURL(img.dataset.blobUrl); delete img.dataset.blobUrl; }
   img.removeAttribute('src');
   currentViewerItemId = null;
+  currentViewerFace = 'front';
 });
 $('viewer-close').addEventListener('click', () => $('dialog-viewer').close());
 $('viewer-delete').addEventListener('click', async () => {
@@ -594,9 +693,15 @@ function resetAddDialog() {
   if (preview.dataset.blobUrl) { URL.revokeObjectURL(preview.dataset.blobUrl); delete preview.dataset.blobUrl; }
   preview.removeAttribute('src');
   $('doc-preview-wrap').hidden = true;
+  $('doc-verso-input').value = '';
+  const versoPreview = $('doc-verso-preview');
+  if (versoPreview.dataset.blobUrl) { URL.revokeObjectURL(versoPreview.dataset.blobUrl); delete versoPreview.dataset.blobUrl; }
+  versoPreview.removeAttribute('src');
+  $('doc-verso-preview-wrap').hidden = true;
+  $('doc-verso-label').hidden = false;
   $('doc-title').value = '';
   $('doc-save').disabled = true;
-  pendingDoc = null;
+  pendingDoc = { front: null, verso: null };
   $('new-pwd-title').value = '';
   $('new-pwd-username').value = '';
   $('new-pwd-password').value = '';
@@ -654,7 +759,7 @@ $('doc-file-input').addEventListener('change', async (e) => {
     const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
     const fullBlob = await drawToCanvasBlob(bitmap, 1600, 0.85);
     const thumbBlob = await drawToCanvasBlob(bitmap, 220, 0.7);
-    pendingDoc = { fullBlob, thumbBlob, mimeType: 'image/jpeg' };
+    pendingDoc.front = { fullBlob, thumbBlob };
     const preview = $('doc-preview');
     if (preview.dataset.blobUrl) URL.revokeObjectURL(preview.dataset.blobUrl);
     const previewUrl = URL.createObjectURL(fullBlob);
@@ -670,11 +775,43 @@ $('doc-file-input').addEventListener('change', async (e) => {
   }
 });
 
-async function saveNewDocument({ fullBlob, thumbBlob, mimeType, title, folderId }) {
-  const fullBytes = new Uint8Array(await fullBlob.arrayBuffer());
-  const thumbBytes = new Uint8Array(await thumbBlob.arrayBuffer());
-  const { iv: fileIv, cipher: fileCipher } = await wa.encryptBytes(state.vaultKey, fullBytes);
-  const { iv: thumbIv, cipher: thumbCipher } = await wa.encryptBytes(state.vaultKey, thumbBytes);
+$('doc-verso-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const fullBlob = await drawToCanvasBlob(bitmap, 1600, 0.85);
+    const thumbBlob = await drawToCanvasBlob(bitmap, 220, 0.7);
+    pendingDoc.verso = { fullBlob, thumbBlob };
+    const preview = $('doc-verso-preview');
+    if (preview.dataset.blobUrl) URL.revokeObjectURL(preview.dataset.blobUrl);
+    const previewUrl = URL.createObjectURL(fullBlob);
+    preview.src = previewUrl;
+    preview.dataset.blobUrl = previewUrl;
+    $('doc-verso-preview-wrap').hidden = false;
+    $('doc-verso-label').hidden = true;
+  } catch (err) {
+    console.error(err);
+    showToast('Impossible de lire cette image.');
+  }
+});
+
+$('doc-verso-remove').addEventListener('click', () => {
+  pendingDoc.verso = null;
+  const preview = $('doc-verso-preview');
+  if (preview.dataset.blobUrl) { URL.revokeObjectURL(preview.dataset.blobUrl); delete preview.dataset.blobUrl; }
+  preview.removeAttribute('src');
+  $('doc-verso-preview-wrap').hidden = true;
+  $('doc-verso-label').hidden = false;
+  $('doc-verso-input').value = '';
+});
+
+async function saveNewDocument({ front, verso, title, folderId }) {
+  const mimeType = 'image/jpeg';
+  const frontFullBytes = new Uint8Array(await front.fullBlob.arrayBuffer());
+  const frontThumbBytes = new Uint8Array(await front.thumbBlob.arrayBuffer());
+  const { iv: fileIv, cipher: fileCipher } = await wa.encryptBytes(state.vaultKey, frontFullBytes);
+  const { iv: thumbIv, cipher: thumbCipher } = await wa.encryptBytes(state.vaultKey, frontThumbBytes);
   const { iv: metaIv, cipher: metaCipher } = await wa.encryptJson(state.vaultKey, { title });
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -682,6 +819,16 @@ async function saveNewDocument({ fullBlob, thumbBlob, mimeType, title, folderId 
     id, folderId: folderId || null, type: 'document', createdAt: now, updatedAt: now, mimeType,
     metaIv, metaCipher, fileIv, fileCipher, thumbIv, thumbCipher,
   };
+  if (verso) {
+    const backFullBytes = new Uint8Array(await verso.fullBlob.arrayBuffer());
+    const backThumbBytes = new Uint8Array(await verso.thumbBlob.arrayBuffer());
+    const { iv: backIv, cipher: backCipher } = await wa.encryptBytes(state.vaultKey, backFullBytes);
+    const { iv: backThumbIv, cipher: backThumbCipher } = await wa.encryptBytes(state.vaultKey, backThumbBytes);
+    record.backIv = backIv;
+    record.backCipher = backCipher;
+    record.backThumbIv = backThumbIv;
+    record.backThumbCipher = backThumbCipher;
+  }
   await db.putItem(record);
   state.items.push({ id, folderId: record.folderId, type: 'document', title, createdAt: now, updatedAt: now, mimeType, _record: record });
   renderFolders();
@@ -701,7 +848,7 @@ async function saveNewPassword({ title, username, password, notes, folderId }) {
 
 $('form-add-document').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!pendingDoc) return;
+  if (!pendingDoc.front) return;
   const title = $('doc-title').value.trim() || '(Sans titre)';
   const folderId = $('doc-folder').value || null;
   try {
