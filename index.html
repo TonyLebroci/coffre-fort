@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Coffre-fort</title>
+<meta name="description" content="Coffre-fort personnel chiffré pour vos documents d'identité et mots de passe, protégé par Face ID / Touch ID." />
+<meta name="theme-color" content="#4F46E5" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Coffre-fort" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon.png" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div id="toast" class="toast" hidden></div>
+
+<main id="app">
+
+  <!-- Chargement initial -->
+  <section id="screen-loading" class="screen screen-center">
+    <div class="logo">🔐</div>
+    <p class="muted">Chargement…</p>
+  </section>
+
+  <!-- Navigateur/appareil non compatible -->
+  <section id="screen-unsupported" class="screen screen-center" hidden>
+    <div class="logo">⚠️</div>
+    <h1>Non compatible</h1>
+    <p class="muted" id="unsupported-message">
+      Cet appareil ou ce navigateur ne supporte pas le déverrouillage biométrique (WebAuthn) nécessaire
+      pour utiliser le coffre-fort en toute sécurité.
+    </p>
+  </section>
+
+  <!-- Première utilisation : création du coffre -->
+  <section id="screen-setup" class="screen screen-center" hidden>
+    <div class="logo">🔐</div>
+    <h1>Coffre-fort</h1>
+    <p class="muted">
+      Tes documents (cartes, passeport, assurance maladie) et mots de passe sont chiffrés et stockés
+      uniquement sur cet appareil, jamais dans le cloud. Le déverrouillage se fait avec Face&nbsp;ID / Touch&nbsp;ID.
+    </p>
+    <button id="btn-start-setup" class="btn btn-primary">Créer mon coffre-fort</button>
+    <p class="fineprint muted">Aucune donnée ne quitte jamais ton navigateur.</p>
+  </section>
+
+  <!-- Écran de verrouillage -->
+  <section id="screen-lock" class="screen screen-center" hidden>
+    <div class="logo">🔒</div>
+    <h1>Coffre-fort verrouillé</h1>
+    <button id="btn-unlock" class="btn btn-primary">Déverrouiller avec Face ID / Touch ID</button>
+    <p class="fineprint muted" id="lock-hint"></p>
+  </section>
+
+  <!-- Application principale -->
+  <section id="screen-main" class="screen" hidden>
+    <header class="topbar">
+      <h1>Coffre-fort</h1>
+      <div class="topbar-actions">
+        <button id="btn-search-toggle" class="icon-btn" aria-label="Rechercher" title="Rechercher">🔍</button>
+        <button id="btn-lock" class="icon-btn" aria-label="Verrouiller" title="Verrouiller">🔒</button>
+      </div>
+    </header>
+
+    <div id="search-bar" class="search-bar" hidden>
+      <input id="search-input" type="search" placeholder="Rechercher un document ou un mot de passe…" autocomplete="off" />
+    </div>
+
+    <div id="folder-chips" class="folder-chips"></div>
+
+    <div id="item-list" class="item-list"></div>
+
+    <div id="empty-state" class="empty-state" hidden>
+      <div class="empty-icon">🗂️</div>
+      <p id="empty-text">Aucun document pour l'instant.<br/>Appuie sur + pour ajouter ta première carte.</p>
+    </div>
+
+    <button id="btn-add" class="fab" aria-label="Ajouter">+</button>
+  </section>
+
+  <!-- Visionneuse plein écran d'un document -->
+  <dialog id="dialog-viewer" class="dialog dialog-fullscreen">
+    <div class="viewer-header">
+      <button id="viewer-close" class="icon-btn" aria-label="Fermer">✕</button>
+      <input id="viewer-title" class="viewer-title-input" type="text" />
+      <button id="viewer-delete" class="icon-btn" aria-label="Supprimer" title="Supprimer">🗑️</button>
+    </div>
+    <div class="viewer-body">
+      <img id="viewer-img" alt="" />
+    </div>
+    <div class="viewer-footer">
+      <label class="field-label" for="viewer-folder">Dossier</label>
+      <select id="viewer-folder"></select>
+    </div>
+  </dialog>
+
+  <!-- Détail / édition d'un mot de passe -->
+  <dialog id="dialog-password" class="dialog">
+    <form id="form-password-detail" class="dialog-form">
+      <div class="dialog-header">
+        <h2>Mot de passe</h2>
+        <button type="button" id="pwd-close" class="icon-btn" aria-label="Fermer">✕</button>
+      </div>
+      <label class="field-label">Titre
+        <input id="pwd-title" type="text" required />
+      </label>
+      <label class="field-label">Identifiant
+        <div class="input-row">
+          <input id="pwd-username" type="text" autocomplete="off" />
+          <button type="button" class="btn-copy" data-copy-target="pwd-username" title="Copier">📋</button>
+        </div>
+      </label>
+      <label class="field-label">Mot de passe
+        <div class="input-row">
+          <input id="pwd-password" type="password" autocomplete="off" />
+          <button type="button" id="pwd-toggle-visibility" class="btn-copy" title="Afficher/masquer">👁️</button>
+          <button type="button" class="btn-copy" data-copy-target="pwd-password" title="Copier">📋</button>
+        </div>
+      </label>
+      <label class="field-label">Notes
+        <textarea id="pwd-notes" rows="3"></textarea>
+      </label>
+      <label class="field-label">Dossier
+        <select id="pwd-folder"></select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="pwd-delete" class="btn btn-danger">Supprimer</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ajout d'un élément -->
+  <dialog id="dialog-add" class="dialog">
+    <div class="dialog-header">
+      <h2>Ajouter</h2>
+      <button type="button" id="add-close" class="icon-btn" aria-label="Fermer">✕</button>
+    </div>
+
+    <div id="add-step-type" class="add-step">
+      <button type="button" class="type-choice" id="choose-type-document">
+        <span class="type-choice-icon">📷</span>
+        <span>Photo de document</span>
+        <span class="muted small">Carte d'identité, passeport, assurance…</span>
+      </button>
+      <button type="button" class="type-choice" id="choose-type-password">
+        <span class="type-choice-icon">🔑</span>
+        <span>Mot de passe</span>
+        <span class="muted small">Identifiant, mot de passe, notes</span>
+      </button>
+    </div>
+
+    <form id="form-add-document" class="dialog-form add-step" hidden>
+      <label class="btn btn-secondary file-label" for="doc-file-input">Choisir ou prendre une photo</label>
+      <input id="doc-file-input" type="file" accept="image/*" class="visually-hidden" />
+      <div id="doc-preview-wrap" class="doc-preview-wrap" hidden>
+        <img id="doc-preview" alt="Aperçu" />
+      </div>
+      <label class="field-label">Titre
+        <input id="doc-title" type="text" required placeholder="ex. Carte d'identité" />
+      </label>
+      <label class="field-label">Dossier
+        <select id="doc-folder"></select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="doc-back">Retour</button>
+        <button type="submit" class="btn btn-primary" id="doc-save" disabled>Enregistrer</button>
+      </div>
+    </form>
+
+    <form id="form-add-password" class="dialog-form add-step" hidden>
+      <label class="field-label">Titre
+        <input id="new-pwd-title" type="text" required placeholder="ex. Compte assurance" />
+      </label>
+      <label class="field-label">Identifiant
+        <input id="new-pwd-username" type="text" autocomplete="off" />
+      </label>
+      <label class="field-label">Mot de passe
+        <div class="input-row">
+          <input id="new-pwd-password" type="password" autocomplete="off" />
+          <button type="button" id="new-pwd-toggle-visibility" class="btn-copy" title="Afficher/masquer">👁️</button>
+        </div>
+      </label>
+      <label class="field-label">Notes
+        <textarea id="new-pwd-notes" rows="3"></textarea>
+      </label>
+      <label class="field-label">Dossier
+        <select id="new-pwd-folder"></select>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="pwd-add-back">Retour</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Nouveau dossier / renommer -->
+  <dialog id="dialog-folder" class="dialog">
+    <form id="form-folder" class="dialog-form">
+      <div class="dialog-header">
+        <h2 id="folder-dialog-title">Nouveau dossier</h2>
+        <button type="button" id="folder-close" class="icon-btn" aria-label="Fermer">✕</button>
+      </div>
+      <label class="field-label">Nom du dossier
+        <input id="folder-name-input" type="text" required maxlength="60" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="folder-delete" class="btn btn-danger" hidden>Supprimer le dossier</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirmation générique -->
+  <dialog id="dialog-confirm" class="dialog dialog-small">
+    <p id="confirm-message"></p>
+    <div class="dialog-actions">
+      <button type="button" id="confirm-cancel" class="btn btn-secondary">Annuler</button>
+      <button type="button" id="confirm-ok" class="btn btn-danger">Confirmer</button>
+    </div>
+  </dialog>
+
+  <!-- Phrase secrète (utilisée seulement si l'appareil ne supporte pas la dérivation
+       de clé biométrique directe ; Face ID / Touch ID reste demandé en plus) -->
+  <dialog id="dialog-passphrase" class="dialog dialog-small">
+    <form id="form-passphrase" class="dialog-form">
+      <div class="dialog-header">
+        <h2 id="passphrase-title">Phrase secrète</h2>
+        <button type="button" id="passphrase-close" class="icon-btn" aria-label="Fermer">✕</button>
+      </div>
+      <p class="muted small" id="passphrase-explain"></p>
+      <label class="field-label">Phrase secrète
+        <input id="passphrase-input-1" type="password" required minlength="8" autocomplete="off" />
+      </label>
+      <label class="field-label" id="passphrase-confirm-wrap">Confirmer la phrase secrète
+        <input id="passphrase-input-2" type="password" minlength="8" autocomplete="off" />
+      </label>
+      <div class="dialog-actions">
+        <button type="submit" class="btn btn-primary">Valider</button>
+      </div>
+    </form>
+  </dialog>
+
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

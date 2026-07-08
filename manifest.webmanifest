@@ -1,0 +1,17 @@
+{
+  "name": "Coffre-fort",
+  "short_name": "Coffre-fort",
+  "description": "Coffre-fort personnel chiffré pour documents d'identité et mots de passe, déverrouillé par Face ID / Touch ID.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0C0C11",
+  "theme_color": "#4F46E5",
+  "lang": "fr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
